@@ -33,7 +33,7 @@ Open MATLAB and navigate to the cloned repository directory. Run the desired scr
 For example:
 
 ```matlab
-Ks_robust
+Ks_simulation
 ```
 
 ## Simulation Image
