@@ -30,10 +30,14 @@ command = char(strcat('FreeFem++ -nw -v 0 Ks_freefem_solver/Ks_simulator.edp', {
 
 [status,cmdout] = system(command);
 %Ksapprox = str2num(cmdout(10:end));
-Ksapprox = cell2mat(textscan(cmdout,'%f %f %f'));
+Ksapprox = cell2mat(textscan(cmdout(10:end),'%f %f %f'));
 
-NT = length(0:dt:Tfinal);
+NT = length(0:dt:Tfinal)-1;
 NX = length(Lmin:((Lmax-Lmin)/meshN):Lmax);
+length(Ksapprox(:,1))
+NT*NX
+
+
 X = reshape(Ksapprox(:,1),[NX ,NT])';
 T = reshape(Ksapprox(:,2),[NX ,NT])';
 Y = reshape(Ksapprox(:,3),[NX ,NT])';

@@ -32,7 +32,6 @@ inicial_cond =  0.001*exp(-x^2);
 [X,T,Y] =  Ks_freefeem_sim(inicial_cond,meshN,Lmin,Lmax,Tfinal,dt);
 
 
-figure(2)
 surf(X,T,Y);
 shading interp
 
