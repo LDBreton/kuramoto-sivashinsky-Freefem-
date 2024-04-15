@@ -34,3 +34,13 @@ For example:
 
 ```matlab
 Ks_robust
+```
+
+## Simulation Image
+![Kuramoto-Sivashinsky Simulation](Kuramoto_simulation.png)
+*The image above represents a simulation result of the Kuramoto-Sivashinsky equation.*
+
+## Citation
+
+
+
