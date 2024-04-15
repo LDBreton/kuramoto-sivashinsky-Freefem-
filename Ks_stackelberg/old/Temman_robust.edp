@@ -1,0 +1,95 @@
+/////////////////////METODO DE GRADIENTE DESCENDIENTE//////////////////
+//////////////////////////////////////////////////////////////////////
+{
+bool salir = 0; 
+real error = 0.0;
+real errordesenso = 0; 
+real erroracenso = 0; 
+real[int] pasov = [0.001]; 
+real[int] pasopsi = [0.001]; 
+
+bool check = true;
+
+real optimalidad = 0.; 
+
+int iterationnum = 0;	
+
+cout << "comenzando la optimizacion" << endl;
+
+while(!salir){
+	
+	SolUvarform(v,psi,h);
+	FillspaceElement(usol,uua)	
+	iterationnum++;
+	J(usol,v,psi,error); 
+   	SolZvarform(uua,uobj);  
+	FillspaceElement(zsol,zza)	
+   	iterationnum++;
+	gradientes(gradv,gradpsi,v,psi,zsol) 
+	caloptimalidad(gradv,gradpsi,optimalidad) 
+	cout << "condicion de optimalidad " << optimalidad << endl;
+	cout << "Valor del funcional " << error << endl;
+	
+    real gpsinorm = gamma*gamma*int2d(ThSpacetime)(gradpsi^2);	   
+    real gvnorm = l*l*int2d(ThSpacetime,10)(gradv^2);
+    iterationnum++;
+
+		
+	func real[int]  DJJV(real[int] &X){
+		FeSpacetimeControlF vaux =v;  
+		descenso(vaux,gradv,X[0]);
+		SolUvarform(vaux,psi,h);
+		SolZvarform(uua,uobj);
+		FillspaceElement(zsol,zza);
+		FeSpacetime gradvaux;
+		gradienteV(gradvaux,vaux,zsol);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime,10)(gradvaux*gradv);
+		return valor;
+		}
+		
+	func real[int]  DJJPSI(real[int] &X){
+		FeSpacetime psiaux =psi;
+		acenso(psiaux,gradpsi,X[0])
+		SolUvarform(v,psiaux,h);		
+		SolZvarform(uua,uobj);
+		FillspaceElement(zsol,zza);
+		FeSpacetime gradpsiaux;
+		gradientePSI(gradpsiaux,psiaux,zsol);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime)(gradpsiaux*gradpsi);
+		return valor;
+		}	
+		
+   func real[int] CV(real[int] &X){
+   if(gvnorm > 1.0)	   
+   X[0] = X[0]/gvnorm;
+   return X; 
+   }
+   
+   func real[int] CPSI(real[int] &X){
+   if(gpsinorm > 1.0)	   	   
+   X[0] = X[0]/gpsinorm;
+   return X; //warning: no return of local array variable
+   }
+   
+    cout << "Obteniendo el paso optimo  de v" << endl;
+    NLCG(DJJV, pasov, precon=CV , nbiter=10, eps=-optitol);
+    cout << "Obteniendo el paso optimo  de psi" << endl;
+    NLCG(DJJPSI, pasopsi, precon=CPSI , nbiter=10, eps=-optitol);
+
+
+   descenso(v,gradv,pasov[0]);
+   acenso(psi,gradpsi,pasopsi[0])
+		
+
+
+	cout << " paso para psi " << pasopsi[0] << endl;
+	cout << " paso para v " << pasov[0] << endl;
+	if( (optimalidad < optitol )  ){
+		salir =1;
+		}
+	} 
+ 
+}
+

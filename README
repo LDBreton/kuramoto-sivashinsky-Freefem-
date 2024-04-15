@@ -1,0 +1,4 @@
+Accuray,m // to obtain the error of the ks method
+Ks_simulation // To solve kuramoto equation
+Ks_robust.m // To solve the robust problem
+Ks_robust_stack.m // to solve the stackelberg robust problem

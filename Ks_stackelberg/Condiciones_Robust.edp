@@ -1,0 +1,4 @@
+func Uini = 0.0*x + exp(-x^2)/1000;
+func Uinixx = 0.0*x +(exp(-x^2)*(2*x^2 - 1))/500;
+func Uobjtivo= 0.0*x +0;
+func Uobjtivoxx = 0.0*x +0;

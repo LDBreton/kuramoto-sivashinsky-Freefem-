@@ -1,0 +1,4 @@
+func yini = 0.0*x + exp(-x^2)/1000;
+func yinixx = 0.0*x +(exp(-x^2)*(2*x^2 - 1))/500;
+func ksol= 0.0*x +exp(-x^2)/1000;
+func ksource= 0.0*x +-(exp(-2*x^2)*(x - 5000*exp(x^2) + 22000*x^2*exp(x^2) - 8000*x^4*exp(x^2)))/500000;

@@ -1,0 +1,7 @@
+mu 1000
+l 100
+gamma 100
+dt 0.01
+Tfinal 1
+iterationnum 18
+optimalidad 8.69437e-08

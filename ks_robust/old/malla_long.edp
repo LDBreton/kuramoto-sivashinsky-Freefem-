@@ -1,0 +1,30 @@
+
+// Funcion que regresa la malla del dominio
+func mesh mallabuild(int n1,real heigths,real Lmin,real Lmax){
+	
+	
+//parametrizacion de la frontera de la malla
+border C01(t=0,1){x=Lmin*(1-t) + Lmax*t ; y= 0.0; label = 1;} 
+border C02(t=0,1){x=Lmax ; y=t*heigths; label = 2;}
+border C03(t=0,1){x=Lmax*(1-t) + Lmin*t; y=heigths; label = 3;}
+border C04(t=0,1){x=Lmin ; y=heigths*(1-t); label = 4;}
+
+//plot(C01(n1)  +C02(10)+C03(n1)+C04(10));
+
+mesh Th = buildmesh(C01(n1)+C03(n1)
+				   +C02(1)+C04(1));
+
+return Th;
+}
+/*
+int n1 = 100; //calidad de la malla del dominio sin los hoyos
+mesh Th = mallabuild(n1); //malla del dominio 
+int reomega1 = Th(0.4,0.0).region;
+int reomega2 = Th(0.8,0.0).region;
+
+mesh Omega1 = trunc(Th,region==reomega1); //malla del dominio del control
+mesh Omega2 = trunc(Th,region==reomega2); //malla del dominio del control
+
+plot(Th,wait=1);
+plot(Omega1,Omega2,wait=1);
+*/

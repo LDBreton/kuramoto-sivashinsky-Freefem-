@@ -1,0 +1,15 @@
+int n1 = getARGV("-meshN",200.0); //calidad de la malla del dominio sin los hoyos
+real Lmin = getARGV("-Lmin",-30.0);
+real Lmax = getARGV("-Lmax",30.0);
+
+//////////////////////////PARAMETROS de la ecuacion//////////////////
+real Tfinal = getARGV("-Tfinal",1.125); // tiempo final
+real dt= getARGV("-dt",1./100000.); // paso del tiempo para el euler hacia adelante
+real alpha=1./dt; // variable auxilar para el inverso del paso del tiempo
+int maxiteration = Tfinal*alpha; // numero de iteraciones totales
+real meshheight = 1.0/n1;
+//condiciones inciales
+
+0.000510164 1.15357e-09
+
+

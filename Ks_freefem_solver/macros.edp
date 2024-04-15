@@ -1,0 +1,90 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+
+
+//copia v[i] = w para toda i
+macro copyFe(v,w)
+for (int i=0;i<maxiteration;i++) {
+	v[i] =  w;
+	}; //EOM
+	
+//copia v[i] = w[i] para toda i	
+macro copyFeA(v,w)
+for (int i=0;i<maxiteration;i++) {
+	v[i] =  w[i];
+	}; //EOM
+
+//copia v[i] = 0. para toda i	
+macro reset(v)
+for (int i=0;i<maxiteration;i++) {
+	v[i] =  0.;
+	}; //EOM	
+
+macro copyFunc(v,funcs)
+for (int i=0;i<maxiteration;i++) {
+	v[i] =  funcs(x,y,(i+1)*dt);
+	}; //EOM
+
+
+macro plotea2(input1,input2,output)
+string comando2 = "echo 'plot " + "\"" + input1 + "\" w l," 
+				 + "\"" + input2 +"\" "+ " w l \
+				   pause 5 \
+				   set term postscript portrait \
+				   set output " 
+				 + "\"" + output + "\" " + " \
+				   replot' | gnuplot";
+exec(comando2);
+//EOM
+
+macro plotea(input,output)
+string comando = "echo 'plot " + "\"" + input +"\" "
+			    + "w l \
+				   pause 5 \
+				   set term postscript portrait \
+				   set output " 
+				 + "\"" + output + "\" " + " \
+				   replot' | gnuplot";
+exec(comando);
+//EOM   
+
+macro saveelement(filename,element) 
+{ofstream foo(filename);
+foo << "2 1 1 "<< element[].n << " 2 \n"; 
+	for (int j=0;j<element[].n ; j++)
+		foo << element[][j] << endl;
+};  //EOM
+
+
+macro Freefemsave(Arrelement,loadIndentifier,maxiteration)
+for (int i=0;i<maxiteration;i++) {
+	string filename = loadIndentifier + i + ".sol";
+    ofstream savedataa(filename); 
+    savedataa << Arrelement[i][];
+	}; //EOM
+
+
+macro readElement(Arrelement,loadIndentifier,maxiteration)
+for (int i=0;i<maxiteration;i++) {
+	string filename = loadIndentifier + i + ".sol";
+    ifstream loaddata(filename); 
+    loaddata >> Arrelement[i][];
+	}; //EOM
+

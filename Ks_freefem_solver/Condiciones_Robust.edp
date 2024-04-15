@@ -1,0 +1,3 @@
+func yini = 0.0*x + sin((x*pi)/30)^2;
+func yinixx = 0.0*x +(pi^2*cos((x*pi)/15))/450;
+func Yobjtivo= 0.0*x +((cos((x*pi)/30) + 1)*(y - 20*cos((x*pi)/30) + 20))/20;

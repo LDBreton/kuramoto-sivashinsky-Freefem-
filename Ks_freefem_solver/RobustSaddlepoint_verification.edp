@@ -1,0 +1,212 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+/*codigo para resolver el problema de control robusto mediante gradiente utilizado el tiempo
+ * 
+ * */
+verbosity= 0; //para minizar el texto de la pantalla
+//Ks_freefem_solver
+string currenddirects = "Ks_freefem_solver/";
+
+include "Ks_freefem_solver/macros.edp" 
+include "Ks_freefem_solver/getARGV.idp"
+include "Ks_freefem_solver/Condiciones_Robust.edp"
+
+
+/////////////////////PARAMETROS DE LA MALLA////////////////////////////////////
+int n1 = getARGV("-meshN",200); //calidad de la malla del dominio sin los hoyos
+real Lmin = getARGV("-Lmin",-30.0);
+real Lmax = getARGV("-Lmax",30.0);
+real LminControl =  getARGV("-LminControl",-10.0);  //lower bound of control region
+real LmaxControl =  getARGV("-LmaxControl",10.0);    //uppper bound of control region
+real meshheight = (Lmax-Lmin)/n1;
+////////////////////PARAMETROS PARA EL CONTROL//////////////////////////
+real l = getARGV("-l",100.0);
+real gamma =getARGV("-gamma",1000.0);
+real mu =getARGV("-mu",200.0);
+func hini = 0.0; 
+func psicontrolini =0.0;
+func vcontrolini =0.0;
+///////////////////////////////////////////////
+
+//////////////////////////PARAMETROS de la ecuacion//////////////////
+real Tfinal = getARGV("-Tfinal",10.0); // tiempo final
+real dt= getARGV("-dt",1./10.); // paso del tiempo para el euler hacia adelante
+real alpha=1./dt; // variable auxilar para el inverso del paso del tiempo
+int  maxiteration = Tfinal*alpha; // numero de iteraciones totales
+/////////////////////////////////////////////////////////////////////
+
+//////Parametros de termino/////////
+real optitol = getARGV("-optitol",10.0^(-6.0)); // tolerancoa del criterio de convergencia
+//////////////////////////////////////////
+
+//Definiendo las mallass y los espacio de elementos
+mesh ThSpacetime = square(n1, maxiteration-1, [Lmin+(Lmax-Lmin)*x, dt + Tfinal*y]);
+mesh Th = square(n1, 1, [Lmin+(Lmax-Lmin)*x, meshheight*y]);
+
+func  newlabel = ( (LminControl  <=x) && (x <= LmaxControl) ) ? 10 : region; 
+Th = change(Th,fregion=newlabel);
+ThSpacetime = change(ThSpacetime,fregion=newlabel);
+
+mesh ThControl  = trunc(Th,region==10);
+mesh ThSpacetimeControl  = trunc(ThSpacetime,region==10);
+
+fespace FeOmega(Th,P1,periodic=[[1,x],[3,x]]); //Espacio de elementos para ks
+fespace FeOmegaControl(ThControl,P1); //Espacio de elementos para ks control
+fespace FeSpacetime(ThSpacetime,P1); //Espacio de elementos de ks
+fespace FeSpacetimeControl(ThSpacetimeControl,P1); //Espacio de elementos de ks control en el tiempo
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+///////////////////Para plotear la solution en el tiempo/////////////////////////////////
+macro FillspaceElement(SpacetimeElement,elementarra)
+{
+for(int j=0 ; j < maxiteration ; j++ )
+	for (int i=j*(n1+1),k=0;i<(j+1)*(n1+1);i++){
+		real xvaraux = ThSpacetime(i).x;
+		SpacetimeElement[][i]  = elementarra[j][][k];
+		k++;
+	}
+}
+//EOM
+
+//////////////////////////////////////////////////////////////
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+FeOmega yy,ytest,ylap,ylaptest,yold,ylapold,yoldold; //elementos para el primal
+FeOmega zz,ztest,zlap,zlaptest,zold,zlapold,zoldold; // elementos para el dual
+FeOmega yydiff; // elemento para guardar (y-yobj)
+FeOmega[int]  cerroa(maxiteration); //objetivo cerro
+copyFe(cerroa,0.0); // defineidno el elemento cero
+
+FeOmega[int] yya(maxiteration); // objetivo del control
+FeOmega[int] zza(maxiteration); // objetivo del control
+
+FeOmega psicontrol; //elemento de la perturbacion para un tiempo fijo
+FeOmegaControl vcontrol;	 //elemento del seguidor para un tiempo fijo
+
+FeSpacetimeControl v,vSol;
+FeSpacetime zdual,ySol,psi,psiSol;
+FeSpacetime yobj=Yobjtivo;
+
+string identifier = "mu_" + mu + "_l_" + l +  "_gamma_" + gamma;
+string dirload = currenddirects+ "savefile/Control_robust_GD_nonlinar/" + identifier;
+
+{
+ifstream file(dirload + "/pertubacion/psi_sol.txt");
+file >> psiSol[];
+}
+
+{
+ifstream file(dirload + "/control/v_sol.txt");
+file >> vSol[];
+}
+
+{
+ifstream file(dirload + "/Estados/ysol_freefem.txt");
+file >> ySol[];
+}
+
+////////////FORMA VARIACIONAL del primal///////////////////////
+real theta = 1./4.;
+problem  Primal([yy,ylap],[ytest,ylaptest],init=1) =
+     int2d(Th,optimize=2)(alpha*yy*ytest)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(ylap)*dx(ytest)
+            - dx(yy)*dx(ytest)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(ylapold)*dx(ytest)
+            - dx(yold)*dx(ytest)
+            ))
+   + int2d(Th,optimize=2)((3./2.)*yold*dx(yold)*(ytest)) 
+   - int2d(Th,optimize=2)((1./2.)*yoldold*dx(yoldold)*(ytest))
+   
+   
+   -int2d(Th,10,optimize=2)( ytest*vcontrol)
+   -int2d(Th,optimize=2)( ytest*psicontrol)            
+
+   + int2d(Th,optimize=2)(dx(yy)*dx(ylaptest))
+   +int2d(Th,optimize=2)( ylap*ylaptest)    
+
+   +int2d(Th,optimize=2)( -alpha*ytest*yold)           
+  + on(2,4,yy=0.0)  // Condiciones de frontera
+;
+
+
+/////Macro para resolver el problema primal//
+macro Solprimal(vs,psis) 
+yold = yini;
+yoldold = yold;
+ylapold = yinixx;
+psicontrol = psis(x,dt);	
+vcontrol = vs(x,dt);	
+Primal;
+yya[0] = yy;  	 
+yold = yy;
+ylapold = ylap;
+for (int i=1;i<maxiteration;i++) {
+real currenttime = (i+1)*dt;
+psicontrol = psis(x,currenttime);	
+vcontrol = vs(x,currenttime);	
+Primal;
+yya[i] = yy;
+yoldold = yold;  	 
+yold = yy;
+ylapold = ylap;	
+};
+//EOM
+
+
+//macro evaluar el funcional
+macro J(ysols,vs,psis,error) 
+    error = 0.0;
+	error = error + (1.0/2.0)*mu*int2d(ThSpacetime)((ysols-yobj)^2.0);
+	error = error + (1.0/2.0)*l*l*int2d(ThSpacetime,10)(vs^2.0);
+	error = error - (1.0/2.0)*gamma*gamma*int2d(ThSpacetime)(psis^2.0);
+	 //EOM
+
+
+real valorSol,valorPertub;
+Solprimal(vSol,psiSol);
+FillspaceElement(ySol,yya)	
+J(ySol,vSol,psiSol,valorSol);
+FeSpacetimeControl pertuvation;
+ofstream TableSadle(dirload + "/Saddle_point_table.txt");
+//perturvando el punto silla
+for (int i=0;i<200.0;i++) {
+	cout << i << endl;
+	pertuvation = exp(-x^2)/((i^2.0) + 2000.0);
+	
+	TableSadle << i << " " << valorSol << " ";
+	psi = psiSol + pertuvation;
+	Solprimal(vSol,psi);
+	FillspaceElement(ySol,yya)	
+	J(ySol,vSol,psi,valorPertub);
+	TableSadle << valorPertub << " ";
+	
+	v = vSol + pertuvation;
+	Solprimal(v,psiSol);
+	FillspaceElement(ySol,yya)	
+	J(ySol,v,psiSol,valorPertub);
+	TableSadle << valorPertub << endl;
+	
+}
+

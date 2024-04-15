@@ -1,0 +1,150 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+/*codigo para resolver la solution exacta de ks
+ * u_t + u_xxxx + u_xx + u*u_x = f
+ * u = u_x = 0 en la frontera
+ * u(.,0) = yini
+ * uxx(.,0) = yinixx
+ * */
+verbosity= 0; //para minizar el texto de la pantalla
+include "Ks_freefem_solver/macros.edp" 
+include "Ks_freefem_solver/Condiciones_sol.edp"
+include "Ks_freefem_solver/getARGV.idp"
+
+/////////////////////PARAMETROS DE LA MALLA////////////////////////////////////
+int n1 = getARGV("-meshN",200.0); //calidad de la malla del dominio sin los hoyos
+real Lmin = getARGV("-Lmin",-30.0);
+real Lmax = getARGV("-Lmax",30.0);
+
+//////////////////////////PARAMETROS de la ecuacion//////////////////
+real Tfinal = getARGV("-Tfinal",1.0); // tiempo final
+real dt= getARGV("-dt",1./100.); // paso del tiempo para el euler hacia adelante
+real alpha=1./dt; // variable auxilar para el inverso del paso del tiempo
+int maxiteration = Tfinal*alpha; // numero de iteraciones totales
+real meshheight = 1.0/n1;
+//condiciones inciales
+
+///////////////////Para plotear la solution en el tiempo/////////////////////////////////
+mesh Th = square(n1, 1, [Lmin+(Lmax-Lmin)*x, meshheight*y]);
+mesh ThSpacetime = square(n1, maxiteration, [Lmin+(Lmax-Lmin)*x, Tfinal*y]);
+fespace FeSpacetime(ThSpacetime,P1); //Espacio de elementos para el ks
+FeSpacetime Ksolaprox ;
+
+//Transforma un arreglo cortes en el tiempo de ks
+// a un elemento de el espacio-tiempo
+
+//SpaceTimeElement[][i] al valor del elemento en el vertice i de la malla
+macro Fillsol(SpaceTimeElement,SpaceElementArr)
+{
+for(int j=0 ; j < 1 ; j++ )
+	for (int i=j*(n1+1);i<(j+1)*(n1+1);i++){
+		real xvaraux = ThSpacetime(i).x;
+		SpaceTimeElement[][i]  = yini(xvaraux,0.0);
+		}
+
+for(int j=1 ; j < maxiteration+1 ; j++ )
+	for (int i=j*(n1+1);i<(j+1)*(n1+1);i++){
+		real xvaraux = ThSpacetime(i).x;
+		SpaceTimeElement[][i]  = SpaceElementArr[j-1](xvaraux,0.0);
+	}
+}
+//EOM
+//////////////////////////////////////////////////////////////
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+fespace FeOmega(Th,P1,periodic=[[1,x],[3,x]]); //Espacio de elementos para ks
+FeOmega yy,ytest,ylap,ylaptest; //elementos para ks
+FeOmega yold,ylapold,yoldold; //elementos para ks
+FeOmega Source;
+FeOmega[int] yya(maxiteration); //arreglo para guardar los estados del primal en el tiempo
+FeSpacetime SourceTime = ksource ;
+
+////////////////////////////////////////////////////////////////////
+
+
+real theta = 1./4.;
+////////////FORMA VARIACIONAL del primal///////////////////////
+problem  Primal([yy,ylap],[ytest,ylaptest],init=1) =
+  
+  //Time derivative part
+     int2d(Th)(alpha*yy*ytest)
+    + int2d(Th)( -alpha*ytest*yold)    
+    
+ //linear theta operator 
+    + int2d(Th)((1-theta)*(
+            - dx(ylap)*dx(ytest)
+            - dx(yy)*dx(ytest)
+            ))
+    + int2d(Th)(theta*(
+            - dx(ylapold)*dx(ytest)
+            - dx(yold)*dx(ytest)
+            ))
+  //Non-linear-BAdams
+   + int2d(Th)((3./2.)*yold*dx(yold)*(ytest)) 
+   - int2d(Th)((1./2.)*yoldold*dx(yoldold)*(ytest)) 
+    
+   //Bilap Part           
+   + int2d(Th)(
+            dx(yy)*dx(ylaptest)     
+            )
+   +int2d(Th)( ylap*ylaptest)
+  
+  //source part
+  -int2d(Th)( Source*ytest)
+
+           
+  + on(2,4,yy=0.0)  // Condiciones de frontera
+;
+
+macro Solprimal(yinicial,lapyinicial) 
+yold = yini;
+yoldold = yold;
+ylapold = lapyinicial;
+
+Source = SourceTime(x,dt);
+Primal;
+yya[0] = yy;  	 
+yold = yy;
+ylapold = ylap;
+
+for (int i=1;i<maxiteration;i++) {
+Source = SourceTime(x,(i+1)*dt);	
+Primal;
+yya[i] = yy;
+yoldold = yold;  	 
+yold = yy;
+ylapold = ylap;
+
+};  //EOM
+
+//Resolviendo ks con yini, yinixx
+Solprimal(yini,yinixx);
+
+//pasando del tiempo discreto a continuo
+Fillsol(Ksolaprox,yya);
+//plot(Plotterelement,wait=1,dim=3,fill=1);
+FeSpacetime Ksolution = ksol ;
+//plot(Ksolution,wait=1,dim=3,fill=1);
+
+FeSpacetime Errorelement = abs(Ksolution-Ksolaprox);
+real error = sqrt(int2d(ThSpacetime)((Ksolution-Ksolaprox)^2));
+cout << Errorelement[].max << " " << error << endl;
+

@@ -1,0 +1,379 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+include "ks_robust/problems_macros.edp"
+include "ks_robust/problems_settings.edp"
+
+//////////////////////////////////////////////////////////////
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+FeOmega phi2,phi2test,phi2lap,phi2laptest,phi2old,phi2lapold,phi2oldold; //elementos para el phi2varform
+FeOmega phi1,phi1test,phi1lap,phi1laptest,phi1old,phi1lapold,phi1oldold; // elementos para el phi1varform
+FeOmega Rhsphi21; 
+FeOmega Rhsphi22; 
+FeOmega[int] phi2a(maxiteration); // objetivo del control
+FeOmega[int] phi1a(maxiteration); // objetivo del control
+FeOmega psicontroldual; //elemento de la perturbacion para un tiempo fijo
+FeOmegaControlF vcontroldual;	 //elemento del seguidor para un tiempo fijo
+FeSpacetimeControlF vdual,gradvdual,w1dual,Bargradvdual;
+FeSpacetime phi1sol,phi2sol,psidual,gradpsidual,w2dual,Bargradpsidual;
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+FeOmega uu,utest,ulap,ulaptest,uold,ulapold,uoldold; //elementos para el Uvarform
+FeOmega zz,ztest,zlap,zlaptest,zold,zlapold,zoldold; // elementos para el dual
+FeOmega uudiff; // elemento para guardar (y-uobj)
+FeOmega[int] uua(maxiteration),uulapa(maxiteration); // objetivo del control
+FeOmega[int] zza(maxiteration); // objetivo del control
+FeOmega psicontrol; //elemento de la perturbacion para un tiempo fijo
+FeOmegaControlF vcontrol;	 //elemento del seguidor para un tiempo fijo
+FeOmegaControlL hcontrol;	 //elemento del seguidor para un tiempo fijo
+FeSpacetimeControlF v,gradv;
+FeSpacetimeControlL h,gradh;
+FeSpacetime zsol,usol,psi,gradpsi;
+FeSpacetime uobj=Uobjtivo;
+
+
+
+////////////FORMA VARIACIONAL de U///////////////////////
+problem  Uvarform([uu,ulap],[utest,ulaptest],init=1) =
+int2d(Th,optimize=2)(alpha*uu*utest)
++ int2d(Th,optimize=2)((1-theta)*(
+- dx(ulap)*dx(utest)
+- dx(uu)*dx(utest)
+))
++ int2d(Th,optimize=2)(theta*(
+- dx(ulapold)*dx(utest)
+- dx(uold)*dx(utest)
+))
++ int2d(Th,optimize=2)((3./2.)*uold*dx(uold)*(utest)) 
+- int2d(Th,optimize=2)((1./2.)*uoldold*dx(uoldold)*(utest))
+
+
+-int2d(Th,FollowerRegionLabel,IntersecRegionLabel,optimize=2)( utest*vcontrol)
+-int2d(Th,optimize=2)( utest*psicontrol)            
+-int2d(Th,LiderRegionLabel,IntersecRegionLabel,optimize=2)( utest*hcontrol)            
+
++int2d(Th,optimize=2)(dx(uu)*dx(ulaptest))
++int2d(Th,optimize=2)( ulap*ulaptest)    
+
++int2d(Th,optimize=2)( -alpha*utest*uold)           
++ on(2,4,uu=0.0)  // Condiciones de frontera
+;
+
+
+////////////FORMA VARIACIONAL de Z///////////////////////
+problem  Zvarform([zz,zlap],[ztest,zlaptest],init=1) =
+int2d(Th,optimize=2)(alpha*zz*ztest)
++ int2d(Th,optimize=2)((1-theta)*(
+- dx(zlap)*dx(ztest)
+- dx(zz)*dx(ztest)
+))
++ int2d(Th,optimize=2)(theta*(
+- dx(zlapold)*dx(ztest)
+- dx(zold)*dx(ztest)
+))
+- int2d(Th,optimize=2)((3./2.)*uold*dx(zold)*(ztest)) 
++ int2d(Th,optimize=2)((1./2.)*uoldold*dx(zoldold)*(ztest)) 
+
++ int2d(Th,optimize=2)(dx(zz)*dx(zlaptest))
++ int2d(Th,optimize=2)( zlap*zlaptest)    
+
++int2d(Th,optimize=2)( mu*ztest*uudiff)   
++int2d(Th,optimize=2)( -alpha*ztest*zold)
+
++ on(2,4,zz=0.0)  // Condiciones de frontera
+;
+
+
+/////Macro para resolver el problema Uvarform//
+macro SolUvarform(vs,psis,hs) 
+uold = Uini;
+uoldold = uold;
+ulapold = Uinixx;
+psicontrol = psis(x,dt);	
+vcontrol = vs(x,dt);	
+hcontrol = hs(x,dt);	
+Uvarform;
+uua[0] = uu;
+uulapa[0] =  ulap; 	 
+uold = uu;
+ulapold = ulap;
+for (int i=1;i<maxiteration;i++) {
+real currenttime = (i+1)*dt;
+psicontrol = psis(x,currenttime);	
+vcontrol = vs(x,currenttime);
+hcontrol = hs(x,currenttime);		
+Uvarform;
+uua[i] = uu;
+uulapa[i] =  ulap; 	 
+uoldold = uold;  	 
+uold = uu;
+ulapold = ulap;	
+};
+//EOM
+
+macro SolZvarform(uuas,Uoobj)
+zold = 0.0;
+zoldold = 0.0;
+zlapold = 0.0;
+zza[maxiteration-1] = 0.0;
+uold = uuas[maxiteration-1];
+uoldold = uuas[maxiteration-1];
+uudiff  = uuas[maxiteration-1]-Uoobj(x,Tfinal);	
+Zvarform;
+zza[maxiteration-2] = zz;
+zoldold = zold;  	 
+zold = zz;
+zlapold = zlap;	
+for (int i=2;i<maxiteration;i++) {
+uold = uuas[maxiteration-i+1];
+uoldold = uuas[maxiteration-i];	
+uudiff = uold-Uoobj(x,Tfinal-dt*(i-1));	
+Zvarform;
+zza[maxiteration-i-1] = zz;
+zoldold = zold;  	 
+zold = zz;
+zlapold = zlap;	 
+};  
+//EOM
+
+
+
+//////////////////////////////////////////////////
+/////////////////MACRO PARA EL PUNTO SILLA////////
+macro NonLinearRobustControl(hs)
+{
+bool salir = 0; 
+real error = 0.0;
+real errordesenso = 0; 
+real erroracenso = 0; 
+real[int] pasov = [0.001]; 
+real[int] pasopsi = [0.001]; 
+
+bool check = true;
+
+real optimalidad = 0.; 
+
+int iterationnum = 0;	
+cout << endl;
+cout << "Beginning Temman method for the saddle problem" << endl;
+
+while(!salir){
+	
+	SolUvarform(v,psi,hs);
+	FillspaceElement(usol,uua)	
+	iterationnum++;
+	J(usol,v,psi,error); 
+   	SolZvarform(uua,uobj);  
+	FillspaceElement(zsol,zza)	
+   	iterationnum++;
+	gradientes(gradv,gradpsi,v,psi,zsol) 
+	caloptimalidad(gradv,gradpsi,optimalidad) 
+	cout << "Current Grad norm == " << optimalidad << endl;
+
+	
+    real gpsinorm = gamma*gamma*int2d(ThSpacetime)(gradpsi^2);	   
+    real gvnorm = l*l*int2d(ThSpacetime,FollowerRegionLabel,IntersecRegionLabel)(gradv^2);
+    iterationnum++;
+
+		
+	func real[int]  DJJV(real[int] &X){
+		FeSpacetimeControlF vaux =v;  
+		descenso(vaux,gradv,X[0]);
+		SolUvarform(vaux,psi,hs);
+		SolZvarform(uua,uobj);
+		FillspaceElement(zsol,zza);
+		FeSpacetime gradvaux;
+		gradienteV(gradvaux,vaux,zsol);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime,FollowerRegionLabel,IntersecRegionLabel)(gradvaux*gradv);
+		return valor;
+		}
+		
+	func real[int]  DJJPSI(real[int] &X){
+		FeSpacetime psiaux =psi;
+		acenso(psiaux,gradpsi,X[0])
+		SolUvarform(v,psiaux,hs);		
+		SolZvarform(uua,uobj);
+		FillspaceElement(zsol,zza);
+		FeSpacetime gradpsiaux;
+		gradientePSI(gradpsiaux,psiaux,zsol);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime)(gradpsiaux*gradpsi);
+		return valor;
+		}	
+		
+   func real[int] CV(real[int] &X){
+   if(gvnorm > 1.0)	   
+   X[0] = X[0]/gvnorm;
+   return X; 
+   }
+   
+   func real[int] CPSI(real[int] &X){
+   if(gpsinorm > 1.0)	   	   
+   X[0] = X[0]/gpsinorm;
+   return X; 
+   }
+   
+    cout << "NLCG for follower step" << endl;
+    NLCG(DJJV, pasov, precon=CV , nbiter=10, eps=optitol);
+    cout << "NLCG for the pertubation step" << endl;
+    NLCG(DJJPSI, pasopsi, precon=CPSI , nbiter=10, eps=optitol);
+
+
+   descenso(v,gradv,pasov[0]);
+   acenso(psi,gradpsi,pasopsi[0])
+		
+
+
+	cout << " follower step =  " << pasopsi[0] << endl;
+	cout << " pertubation step = " << pasov[0] << endl;
+	if( (optimalidad < optitol )  ){
+		salir =1;
+		}
+	} 
+ 
+}
+
+h=0.0;
+ 
+//resolver el nonlinear robust control
+NonLinearRobustControl(h);
+   
+//Obteniendo U con el punto silla v y psi
+SolUvarform(v,psi,h);
+
+FillspaceElement(usol,uua);
+
+
+
+
+///////////////////////////Guardando todo///////////////////////
+
+{
+ofstream Saveparam(dirsave + "/parametros.txt"); 
+Saveparam << "mu " << mu << endl;
+Saveparam << "l " << l << endl;
+Saveparam << "gamma " << gamma << endl;
+Saveparam << "dt " << dt << endl;
+Saveparam << "Tfinal " << Tfinal << endl;
+Saveparam << "beta1 " << beta1 << endl;
+Saveparam << "beta2 " << beta2 << endl;
+}
+
+
+//guardando los estados
+exec("mkdir " + dirsave + "/Estados");
+
+
+//Guardando el error del control
+{
+string filename1 = "/Estados/T_error"  + ".txt";
+ofstream file(dirsave + filename1);
+for (int i=0;i<maxiteration;i++) {
+	FeOmega uobjslice = Uobjtivo(x,(i+1)*dt); 
+    file <<(i+1)*dt <<" " << int2d(Th)((uua[i]-uobjslice)^2.0)/meshheight << endl; 
+}		
+}
+
+{
+string name = dirsave + "/Estados/" + "usol_matlab.txt" ;  
+ofstream savedataa(name);
+for(int i=0 ; i < ThSpacetime.nv; i++ )
+savedataa.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< usol[][i] << endl;;
+}
+
+{
+string name = dirsave + "/Estados/" + "usol_freefem.txt" ;  
+ofstream savedataa(name);
+savedataa << usol[];
+}
+
+
+
+//guardando la pertubacion
+exec("mkdir " + dirsave + "/pertubacion");
+{
+	string name = dirsave + "/pertubacion/" + "psi_sol.txt";  
+	ofstream file(name);
+	file << psi[];
+}
+{
+	string name = dirsave + "/pertubacion/" + "psi_sol_matlab.txt";  
+	ofstream file(name);
+	for(int i=0 ; i < ThSpacetime.nv; i++ )
+	file.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< psi[][i] << endl;;
+
+}
+
+
+//guardando el seguidor
+exec("mkdir " + dirsave + "/seguidor");
+
+{
+	string name = dirsave + "/seguidor/" + "v_sol.txt";  
+	ofstream file(name);
+	file << v[];
+}
+
+//seguidor en todo el espacio
+FeSpacetime vfullspace = v*chi(ThSpacetimeControlF); 
+
+{
+	string name = dirsave + "/seguidor/" + "vfull_sol_matlab.txt";  
+	ofstream file(name);
+	for(int i=0 ; i < ThSpacetime.nv; i++ )
+	file.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< vfullspace[][i] << endl;;
+
+}
+
+//guardando el lider
+exec("mkdir " + dirsave + "/lider");
+
+{
+	string name = dirsave + "/lider/" + "h_sol.txt";  
+	ofstream file(name);
+	file << v[];
+}
+
+//lider en todo el espacio
+FeSpacetime hfullspace = h*chi(ThSpacetimeControlL); 
+
+{
+	string name = dirsave + "/lider/" + "hfull_sol_matlab.txt";  
+	ofstream file(name);
+	for(int i=0 ; i < ThSpacetime.nv; i++ )
+	file.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< hfullspace[][i] << endl;;
+
+}
+
+
+//Guardando loss datos para  despues
+savemesh(ThSpacetime,dirsave + "/ThSpacetime.msh"); // freefem
+savemesh(ThSpacetimeControlF,dirsave + "/ThSpacetimeControlF.msh"); // freefem
+savemesh(ThSpacetimeControlL,dirsave + "/ThSpacetimeControlL.msh"); // freefem
+
+
+
+
+
+
+ 

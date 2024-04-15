@@ -1,0 +1,224 @@
+include "Parameters.edp"
+include "Macros_aux.edp"
+
+//////////////////////////////////////////////////////////////
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+FeOmega phi2,phi2test,phi2lap,phi2laptest,phi2old,phi2lapold,phi2oldold; //elementos para el phi2Varform
+FeOmega phi1,phi1test,phi1lap,phi1laptest,phi1old,phi1lapold,phi1oldold; // elementos para el phi1Varform
+FeOmega Rhsphi1; // elemento para guardar (y-yobj)
+FeOmega[int]  cerroa(maxiteration); //objetivo cerro
+copyFe(cerroa,0.0); // defineidno el elemento cero
+
+FeOmega[int] phi2a(maxiteration); // objetivo del control
+FeOmega[int] phi1a(maxiteration); // objetivo del control
+
+FeOmega psicontroldual; //elemento de la perturbacion para un tiempo fijo
+FeOmegaControl vcontroldual;	 //elemento del seguidor para un tiempo fijo
+
+FeSpacetimeControl vdual,gradvdual;
+FeSpacetime phi1sol,phi2sol,psidual,gradpsidual;
+FeSpacetime yobj=Yobjtivo;
+
+////////////FORMA VARIACIONAL del phi2Varform///////////////////////
+real theta = 1./4.;
+problem  phi2Varform([phi2,phi2lap],[phi2test,phi2laptest],init=1) =
+     int2d(Th,optimize=2)(alpha*phi2*phi2test)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(phi2lap)*dx(phi2test)
+            - dx(phi2)*dx(phi2test)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(phi2lapold)*dx(phi2test)
+            - dx(phi2old)*dx(phi2test)
+            ))
+   + int2d(Th,optimize=2)((3./2.)*phi2old*dx(phi2old)*(phi2test)) 
+   - int2d(Th,optimize=2)((1./2.)*phi2oldold*dx(phi2oldold)*(phi2test))
+   
+   
+   -int2d(Th,10,optimize=2)( phi2test*vcontroldual)
+   -int2d(Th,optimize=2)( phi2test*psicontroldual)            
+
+   + int2d(Th,optimize=2)(dx(phi2)*dx(phi2laptest))
+   +int2d(Th,optimize=2)( phi2lap*phi2laptest)    
+
+   +int2d(Th,optimize=2)( -alpha*phi2test*phi2old)           
+  + on(2,4,phi2=0.0)  // Condiciones de frontera
+;
+
+////////////FORMA VARIACIONAL del phi1Varform///////////////////////
+problem  phi1Varform([phi1,phi1lap],[phi1test,phi1laptest],init=1) =
+       int2d(Th,optimize=2)(alpha*phi1*phi1test)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(phi1lap)*dx(phi1test)
+            - dx(phi1)*dx(phi1test)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(phi1lapold)*dx(phi1test)
+            - dx(phi1old)*dx(phi1test)
+            ))
+   - int2d(Th,optimize=2)((3./2.)*phi2old*dx(phi1old)*(phi1test)) 
+   + int2d(Th,optimize=2)((1./2.)*phi2oldold*dx(phi1oldold)*(phi1test)) 
+              
+   + int2d(Th,optimize=2)(dx(phi1)*dx(phi1laptest))
+   + int2d(Th,optimize=2)( phi1lap*phi1laptest)    
+
+   +int2d(Th,optimize=2)( mu*phi1test*Rhsphi1)   
+   +int2d(Th,optimize=2)( -alpha*phi1test*phi1old)
+          
+  + on(2,4,phi1=0.0)  // Condiciones de frontera
+;
+
+
+/////Macro para resolver el problema phi2Varform//
+macro Solphi2Varform(vs,psis) 
+phi2old = yini;
+phi2oldold = phi2old;
+phi2lapold = yinixx;
+psicontroldual = psis(x,dt);	
+vcontroldual = vs(x,dt);	
+phi2Varform;
+phi2a[0] = phi2;  	 
+phi2old = phi2;
+phi2lapold = phi2lap;
+for (int i=1;i<maxiteration;i++) {
+real currenttime = (i+1)*dt;
+psicontroldual = psis(x,currenttime);	
+vcontroldual = vs(x,currenttime);	
+phi2Varform;
+phi2a[i] = phi2;
+phi2oldold = phi2old;  	 
+phi2old = phi2;
+phi2lapold = phi2lap;	
+};
+//EOM
+
+macro Solphi1Varform(phi2ak,Yoobj)
+phi1old = 0.0;
+phi1oldold = 0.0;
+phi1lapold = 0.0;
+phi1a[maxiteration-1] = 0.0;
+phi2old = phi2ak[maxiteration-1];
+phi2oldold = phi2ak[maxiteration-1];
+Rhsphi1  = phi2ak[maxiteration-1]-Yoobj(x,Tfinal);	
+phi1Varform;
+phi1a[maxiteration-2] = phi1;
+phi1oldold = phi1old;  	 
+phi1old = phi1;
+phi1lapold = phi1lap;	
+for (int i=2;i<maxiteration;i++) {
+phi2old = phi2ak[maxiteration-i+1];
+phi2oldold = phi2ak[maxiteration-i];	
+Rhsphi1 = phi2old-Yoobj(x,Tfinal-dt*(i-1));	
+phi1Varform;
+phi1a[maxiteration-i-1] = phi1;
+phi1oldold = phi1old;  	 
+phi1old = phi1;
+phi1lapold = phi1lap;	 
+
+};  
+//EOM
+
+//int2d(ThSpacetime,10)(vs^2.0); integrtando en la region del subdomino
+//macro evaluar el funcional
+macro Jdual(phi2sols,vs,psis,error) 
+    error = 0.0;
+	error = error + (1.0/2.0)*mu*int2d(ThSpacetime)((phi2sols-yobj)^2.0);
+	error = error + (1.0/2.0)*l*l*int2d(ThSpacetime,10)(vs^2.0);
+	error = error - (1.0/2.0)*gamma*gamma*int2d(ThSpacetime)(psis^2.0);
+	 //EOM
+
+/////////////////////METODO DE GRADIENTE DESCENDIENTE//////////////////
+//////////////////////////////////////////////////////////////////////
+bool salir = 0; //variable para salir del loop
+real error = 0.0;
+real errordesenso = 0; //variable donde se guarda el resultado del funcional despues un descenso efectivo
+real erroracenso = 0; //error al intentar el descenso
+real[int] pasov = [0.001]; //paso incial del medodo de gradiente descendiente
+real[int] pasopsi = [0.001]; //paso incial del medodo de gradiente descendiente
+
+bool check = true;
+
+real optimalidad = 0.; //donde guardamos el criterio de optimalidad
+
+int iterationnum = 0;	
+
+/////////////////////////Algorithmo de punto silla///////////
+cout << "comenzando la optimizacion" << endl;
+{
+while(!salir){
+	
+	Solphi2Varform(vdual,psidual);
+	FillspaceElement(phi2sol,phi2a)	
+	iterationnum++;
+	Jdual(phi2sol,vdual,psidual,error); //evaluo el funcioanl
+   	Solphi1Varform(phi2a,yobj);  // resuelvo el phi1Varform
+	FillspaceElement(phi1sol,phi1a)	
+   	iterationnum++;
+	gradientes(gradvdual,gradpsidual,vdual,psidual,phi1sol) // gracias al phi1Varform podemos calcular el gradientes
+	caloptimalidad(gradvdual,gradpsidual,optimalidad) // veo la condicion de optimalidad
+	cout << "condicion de optimalidad " << optimalidad << endl;
+	cout << "Valor del funcional " << error << endl;
+	
+    real gpsinorm = gamma*gamma*int2d(ThSpacetime)(gradpsidual^2);	   
+    real gvnorm = l*l*int2d(ThSpacetime,10)(gradvdual^2);
+    iterationnum++;
+
+		
+	func real[int]  DJJV(real[int] &X){
+		FeSpacetimeControl vaux =vdual;  
+		descenso(vaux,gradvdual,X[0]);
+		Solphi2Varform(vaux,psidual);
+		Solphi1Varform(phi2a,yobj);
+		FillspaceElement(phi1sol,phi1a);
+		FeSpacetime gradvaux;
+		gradienteV(gradvaux,vaux,phi1sol);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime,10)(gradvaux*gradvdual);
+		return valor;
+		}
+		
+	func real[int]  DJJPSI(real[int] &X){
+		FeSpacetime psiaux =psidual;
+		acenso(psiaux,gradpsidual,X[0])
+		Solphi2Varform(vdual,psiaux);		
+		Solphi1Varform(phi2a,yobj);
+		FillspaceElement(phi1sol,phi1a);
+		FeSpacetime gradpsiaux;
+		gradientePSI(gradpsiaux,psiaux,phi1sol);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime)(gradpsiaux*gradpsidual);
+		return valor;
+		}	
+		
+   func real[int] CV(real[int] &X){
+   if(gvnorm > 1.0)	   
+   X[0] = X[0]/gvnorm;
+   return X; //warning: no return of local array variable
+   }
+   
+   func real[int] CPSI(real[int] &X){
+   if(gpsinorm > 1.0)	   	   
+   X[0] = X[0]/gpsinorm;
+   return X; //warning: no return of local array variable
+   }
+   
+    cout << "Obteniendo el paso optimo  de v" << endl;
+    NLCG(DJJV, pasov, precon=CV , nbiter=10, eps=-optitol);
+    cout << "Obteniendo el paso optimo  de psi" << endl;
+    NLCG(DJJPSI, pasopsi, precon=CPSI , nbiter=10, eps=-optitol);
+
+
+   descenso(vdual,gradvdual,pasov[0]);
+   acenso(psidual,gradpsidual,pasopsi[0])
+		
+
+
+	cout << " paso para psi " << pasopsi[0] << endl;
+	cout << " paso para v " << pasov[0] << endl;
+	if( (optimalidad < optitol )  ){
+		salir =1;
+		}
+	} 
+ }

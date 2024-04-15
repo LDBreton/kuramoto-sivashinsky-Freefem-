@@ -1,0 +1,131 @@
+include "Parameters.edp"
+include "Macros_aux.edp"
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+FeOmega yy,ytest,ylap,ylaptest,yold,ylapold,yoldold; //elementos para el primal
+FeOmega zz,ztest,zlap,zlaptest,zold,zlapold,zoldold; // elementos para el dual
+FeOmega yydiff; // elemento para guardar (y-yobj)
+FeOmega[int]  cerroa(maxiteration); //objetivo cerro
+copyFe(cerroa,0.0); // defineidno el elemento cero
+
+FeOmega[int] yya(maxiteration); // objetivo del control
+FeOmega[int] zza(maxiteration); // objetivo del control
+
+FeOmega psicontrol; //elemento de la perturbacion para un tiempo fijo
+FeOmegaControl vcontrol;	 //elemento del seguidor para un tiempo fijo
+
+FeSpacetimeControl v,gradv;
+FeSpacetime zsol,ysol,psi,gradpsi;
+FeSpacetime yobj=Yobjtivo;
+
+////////////FORMA VARIACIONAL del primal///////////////////////
+real theta = 1./4.;
+problem  Primal([yy,ylap],[ytest,ylaptest],init=1) =
+     int2d(Th,optimize=2)(alpha*yy*ytest)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(ylap)*dx(ytest)
+            - dx(yy)*dx(ytest)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(ylapold)*dx(ytest)
+            - dx(yold)*dx(ytest)
+            ))
+   + int2d(Th,optimize=2)((3./2.)*yold*dx(yold)*(ytest)) 
+   - int2d(Th,optimize=2)((1./2.)*yoldold*dx(yoldold)*(ytest))
+   
+   
+   -int2d(Th,10,optimize=2)( ytest*vcontrol)
+   -int2d(Th,optimize=2)( ytest*psicontrol)            
+
+   + int2d(Th,optimize=2)(dx(yy)*dx(ylaptest))
+   +int2d(Th,optimize=2)( ylap*ylaptest)    
+
+   +int2d(Th,optimize=2)( -alpha*ytest*yold)           
+  + on(2,4,yy=0.0)  // Condiciones de frontera
+;
+
+////////////FORMA VARIACIONAL del dual///////////////////////
+problem  dual([zz,zlap],[ztest,zlaptest],init=1) =
+       int2d(Th,optimize=2)(alpha*zz*ztest)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(zlap)*dx(ztest)
+            - dx(zz)*dx(ztest)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(zlapold)*dx(ztest)
+            - dx(zold)*dx(ztest)
+            ))
+   - int2d(Th,optimize=2)((3./2.)*yold*dx(zold)*(ztest)) 
+   + int2d(Th,optimize=2)((1./2.)*yoldold*dx(zoldold)*(ztest)) 
+              
+   + int2d(Th,optimize=2)(dx(zz)*dx(zlaptest))
+   + int2d(Th,optimize=2)( zlap*zlaptest)    
+
+   +int2d(Th,optimize=2)( mu*ztest*yydiff)   
+   +int2d(Th,optimize=2)( -alpha*ztest*zold)
+          
+  + on(2,4,zz=0.0)  // Condiciones de frontera
+;
+
+
+/////Macro para resolver el problema primal//
+macro Solprimal(vs,psis) 
+yold = yini;
+yoldold = yold;
+ylapold = yinixx;
+psicontrol = psis(x,dt);	
+vcontrol = vs(x,dt);	
+Primal;
+yya[0] = yy;  	 
+yold = yy;
+ylapold = ylap;
+for (int i=1;i<maxiteration;i++) {
+real currenttime = (i+1)*dt;
+psicontrol = psis(x,currenttime);	
+vcontrol = vs(x,currenttime);	
+Primal;
+yya[i] = yy;
+yoldold = yold;  	 
+yold = yy;
+ylapold = ylap;	
+};
+//EOM
+
+macro Soldual(yyak,Yoobj)
+zold = 0.0;
+zoldold = 0.0;
+zlapold = 0.0;
+zza[maxiteration-1] = 0.0;
+yold = yyak[maxiteration-1];
+yoldold = yyak[maxiteration-1];
+yydiff  = yyak[maxiteration-1]-Yoobj(x,Tfinal);	
+dual;
+zza[maxiteration-2] = zz;
+zoldold = zold;  	 
+zold = zz;
+zlapold = zlap;	
+for (int i=2;i<maxiteration;i++) {
+yold = yyak[maxiteration-i+1];
+yoldold = yyak[maxiteration-i];	
+yydiff = yold-Yoobj(x,Tfinal-dt*(i-1));	
+dual;
+zza[maxiteration-i-1] = zz;
+zoldold = zold;  	 
+zold = zz;
+zlapold = zlap;	 
+
+};  
+//EOM
+
+//int2d(ThSpacetime,10)(vs^2.0); integrtando en la region del subdomino
+//macro evaluar el funcional
+macro J(ysols,vs,psis,error) 
+    error = 0.0;
+	error = error + (1.0/2.0)*mu*int2d(ThSpacetime)((ysols-yobj)^2.0);
+	error = error + (1.0/2.0)*l*l*int2d(ThSpacetime,10)(vs^2.0);
+	error = error - (1.0/2.0)*gamma*gamma*int2d(ThSpacetime)(psis^2.0);
+	 //EOM
+
+include "Temman_robust.edp"
+

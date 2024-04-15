@@ -1,0 +1,461 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+/*codigo para resolver el problema de control robusto mediante gradiente utilizado el tiempo
+ * 
+ * */
+verbosity= 0; //para minizar el texto de la pantalla
+//include "Ks_freefem_solver/macros.edp" 
+//include "Ks_freefem_solver/getARGV.idp"
+//include "Ks_freefem_solver/Condiciones_Robust.edp"
+include "macros.edp" 
+include "getARGV.idp"
+include "Condiciones_Robust.edp"
+
+
+/////////////////////PARAMETROS DE LA MALLA////////////////////////////////////
+int n1 = getARGV("-meshN",100); //calidad de la malla del dominio sin los hoyos
+real Lmin = getARGV("-Lmin",-30.0);
+real Lmax = getARGV("-Lmax",30.0);
+real LminControl =  getARGV("-LminControl",-10.0);  //lower bound of control region
+real LmaxControl =  getARGV("-LmaxControl",10.0);    //uppper bound of control region
+real meshheight = (Lmax-Lmin)/n1;
+////////////////////PARAMETROS PARA EL CONTROL//////////////////////////
+real l = getARGV("-l",100.0);
+real gamma =getARGV("-gamma",1000.0);
+real mu =getARGV("-mu",200.0);
+func hini = 0.0; 
+func psicontrolini =0.0;
+func vcontrolini =0.0;
+///////////////////////////////////////////////
+
+//////////////////////////PARAMETROS de la ecuacion//////////////////
+real Tfinal = getARGV("-Tfinal",10.0); // tiempo final
+real dt= getARGV("-dt",1./10.); // paso del tiempo para el euler hacia adelante
+real alpha=1./dt; // variable auxilar para el inverso del paso del tiempo
+int  maxiteration = Tfinal*alpha; // numero de iteraciones totales
+/////////////////////////////////////////////////////////////////////
+
+//////Parametros de termino/////////
+real optitol = getARGV("-optitol",10.0^(-6.0)); // tolerancoa del criterio de convergencia
+//////////////////////////////////////////
+
+//Definiendo las mallas y los espacio de elementos
+mesh ThSpacetime = square(n1, maxiteration-1, [Lmin+(Lmax-Lmin)*x, dt + Tfinal*y]);
+mesh Th = square(n1, 1, [Lmin+(Lmax-Lmin)*x, meshheight*y]);
+
+//region del dominio de control si ( (LminControl  <=x) && (x <= LmaxControl) ) region=10 sino igual
+func  newlabel = ( (LminControl  <=x) && (x <= LmaxControl) ) ? 10 : region; 
+Th = change(Th,fregion=newlabel);
+////////////////////////////////////////////////////////////
+ThSpacetime = change(ThSpacetime,fregion=newlabel);
+
+//mallas del subdominio
+mesh ThControl  = trunc(Th,region==10);
+mesh ThSpacetimeControl  = trunc(ThSpacetime,region==10);
+
+//elementos del subdominio
+fespace FeOmega(Th,P1,periodic=[[1,x],[3,x]]); //Espacio de elementos para ks
+fespace FeOmegaControl(ThControl,P1); //Espacio de elementos para ks control
+fespace FeSpacetime(ThSpacetime,P1); //Espacio de elementos de ks
+fespace FeSpacetimeControl(ThSpacetimeControl,P1); //Espacio de elementos de ks control en el tiempo
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+///////////////////Para plotear la solution en el tiempo/////////////////////////////////
+macro FillspaceElement(SpacetimeElement,elementarra)
+{
+for(int j=0 ; j < maxiteration ; j++ )
+	for (int i=j*(n1+1),k=0;i<(j+1)*(n1+1);i++){
+		real xvaraux = ThSpacetime(i).x;
+		SpacetimeElement[][i]  = elementarra[j][][k];
+		k++;
+	}
+}
+//EOM
+
+//////////////////////////////////////////////////////////////
+
+/////////ELEMENTOS //////////////////////
+//Definiendo los elementos
+FeOmega yy,ytest,ylap,ylaptest,yold,ylapold,yoldold; //elementos para el primal
+FeOmega zz,ztest,zlap,zlaptest,zold,zlapold,zoldold; // elementos para el dual
+FeOmega yydiff; // elemento para guardar (y-yobj)
+FeOmega[int]  cerroa(maxiteration); //objetivo cerro
+copyFe(cerroa,0.0); // defineidno el elemento cero
+
+FeOmega[int] yya(maxiteration); // objetivo del control
+FeOmega[int] zza(maxiteration); // objetivo del control
+
+FeOmega psicontrol; //elemento de la perturbacion para un tiempo fijo
+FeOmegaControl vcontrol;	 //elemento del seguidor para un tiempo fijo
+
+FeSpacetimeControl v,gradv;
+FeSpacetime zdual,ysol,psi,gradpsi;
+FeSpacetime yobj=Yobjtivo;
+
+////////////FORMA VARIACIONAL del primal///////////////////////
+real theta = 1./4.;
+problem  Primal([yy,ylap],[ytest,ylaptest],init=1) =
+     int2d(Th,optimize=2)(alpha*yy*ytest)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(ylap)*dx(ytest)
+            - dx(yy)*dx(ytest)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(ylapold)*dx(ytest)
+            - dx(yold)*dx(ytest)
+            ))
+   + int2d(Th,optimize=2)((3./2.)*yold*dx(yold)*(ytest)) 
+   - int2d(Th,optimize=2)((1./2.)*yoldold*dx(yoldold)*(ytest))
+   
+   
+   -int2d(Th,10,optimize=2)( ytest*vcontrol)
+   -int2d(Th,optimize=2)( ytest*psicontrol)            
+
+   + int2d(Th,optimize=2)(dx(yy)*dx(ylaptest))
+   +int2d(Th,optimize=2)( ylap*ylaptest)    
+
+   +int2d(Th,optimize=2)( -alpha*ytest*yold)           
+  + on(2,4,yy=0.0)  // Condiciones de frontera
+;
+
+////////////FORMA VARIACIONAL del dual///////////////////////
+problem  dual([zz,zlap],[ztest,zlaptest],init=1) =
+       int2d(Th,optimize=2)(alpha*zz*ztest)
+    + int2d(Th,optimize=2)((1-theta)*(
+            - dx(zlap)*dx(ztest)
+            - dx(zz)*dx(ztest)
+            ))
+    + int2d(Th,optimize=2)(theta*(
+            - dx(zlapold)*dx(ztest)
+            - dx(zold)*dx(ztest)
+            ))
+   - int2d(Th,optimize=2)((3./2.)*yold*dx(zold)*(ztest)) 
+   + int2d(Th,optimize=2)((1./2.)*yoldold*dx(zoldold)*(ztest)) 
+              
+   + int2d(Th,optimize=2)(dx(zz)*dx(zlaptest))
+   + int2d(Th,optimize=2)( zlap*zlaptest)    
+
+   +int2d(Th,optimize=2)( mu*ztest*yydiff)   
+   +int2d(Th,optimize=2)( -alpha*ztest*zold)
+          
+  + on(2,4,zz=0.0)  // Condiciones de frontera
+;
+
+
+/////Macro para resolver el problema primal//
+macro Solprimal(vs,psis) 
+yold = yini;
+yoldold = yold;
+ylapold = yinixx;
+psicontrol = psis(x,dt);	
+vcontrol = vs(x,dt);	
+Primal;
+yya[0] = yy;  	 
+yold = yy;
+ylapold = ylap;
+for (int i=1;i<maxiteration;i++) {
+real currenttime = (i+1)*dt;
+psicontrol = psis(x,currenttime);	
+vcontrol = vs(x,currenttime);	
+Primal;
+yya[i] = yy;
+yoldold = yold;  	 
+yold = yy;
+ylapold = ylap;	
+};
+//EOM
+
+macro Soldual(yyak,Yoobj)
+zold = 0.0;
+zoldold = 0.0;
+zlapold = 0.0;
+zza[maxiteration-1] = 0.0;
+yold = yyak[maxiteration-1];
+yoldold = yyak[maxiteration-1];
+yydiff  = yyak[maxiteration-1]-Yoobj(x,Tfinal);	
+dual;
+zza[maxiteration-2] = zz;
+zoldold = zold;  	 
+zold = zz;
+zlapold = zlap;	
+for (int i=2;i<maxiteration;i++) {
+yold = yyak[maxiteration-i+1];
+yoldold = yyak[maxiteration-i];	
+yydiff = yold-Yoobj(x,Tfinal-dt*(i-1));	
+dual;
+zza[maxiteration-i-1] = zz;
+zoldold = zold;  	 
+zold = zz;
+zlapold = zlap;	 
+
+};  
+//EOM
+
+//int2d(ThSpacetime,10)(vs^2.0); integrtando en la region del subdomino
+//macro evaluar el funcional
+macro J(ysols,vs,psis,error) 
+    error = 0.0;
+	error = error + (1.0/2.0)*mu*int2d(ThSpacetime)((ysols-yobj)^2.0);
+	error = error + (1.0/2.0)*l*l*int2d(ThSpacetime,10)(vs^2.0);
+	error = error - (1.0/2.0)*gamma*gamma*int2d(ThSpacetime)(psis^2.0);
+	 //EOM
+
+//macro para calcular el gradiente
+macro gradientes(gradvs,gradpsis,vs,psis,zduals)
+gradpsis = -gamma*gamma*psis-zduals;
+gradvs = l*l*vs-zduals;
+; //EOM
+macro gradienteV(gradvs,vs,zduals)
+gradvs = l*l*vs-zduals;
+; //EOM
+
+macro gradientePSI(gradpsis,psis,zduals)
+gradpsis = -gamma*gamma*psis-zduals;
+; //EOM
+
+//macro para ver la norm de la condicion de optimalidad
+macro caloptimalidad(gradvk,gradpsik,optimalidad)
+optimalidad = 0.;
+optimalidad = optimalidad + int2d(ThSpacetime,10)(gradvk^2);
+optimalidad = optimalidad + int2d(ThSpacetime)(gradpsik^2);
+; //EOM
+
+
+//macro para el paso de descenso
+macro descenso(vk,gradvk,pasovk)
+vk = vk - pasovk*gradv;
+//EOM
+
+//macro para el paso de acenso
+macro acenso(psik,gradpsik,pasopsik)
+psik = psik + pasopsik*gradpsik;
+ //EOM
+
+/////////////////////METODO DE GRADIENTE DESCENDIENTE//////////////////
+//////////////////////////////////////////////////////////////////////
+bool salir = 0; //variable para salir del loop
+real error = 0.0;
+real errordesenso = 0; //variable donde se guarda el resultado del funcional despues un descenso efectivo
+real erroracenso = 0; //error al intentar el descenso
+real[int] pasov = [0.001]; //paso incial del medodo de gradiente descendiente
+real[int] pasopsi = [0.001]; //paso incial del medodo de gradiente descendiente
+
+bool check = true;
+
+real optimalidad = 0.; //donde guardamos el criterio de optimalidad
+
+int iterationnum = 0;	
+
+/////////////////////////Algorithmo de punto silla///////////
+cout << "comenzando la optimizacion" << endl;
+{
+while(!salir){
+	
+	Solprimal(v,psi);
+	FillspaceElement(ysol,yya)	
+	iterationnum++;
+	J(ysol,v,psi,error); //evaluo el funcioanl
+   	Soldual(yya,yobj);  // resuelvo el dual
+	FillspaceElement(zdual,zza)	
+   	iterationnum++;
+	gradientes(gradv,gradpsi,v,psi,zdual) // gracias al dual podemos calcular el gradientes
+	caloptimalidad(gradv,gradpsi,optimalidad) // veo la condicion de optimalidad
+	cout << "condicion de optimalidad " << optimalidad << endl;
+	cout << "Valor del funcional " << error << endl;
+	
+    real gpsinorm = gamma*gamma*int2d(ThSpacetime)(gradpsi^2);	   
+    real gvnorm = l*l*int2d(ThSpacetime,10)(gradv^2);
+    iterationnum++;
+
+		
+	func real[int]  DJJV(real[int] &X){
+		FeSpacetimeControl vaux =v;  
+		descenso(vaux,gradv,X[0]);
+		Solprimal(vaux,psi);
+		Soldual(yya,yobj);
+		FillspaceElement(zdual,zza);
+		FeSpacetime gradvaux;
+		gradienteV(gradvaux,vaux,zdual);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime,10)(gradvaux*gradv);
+		return valor;
+		}
+		
+	func real[int]  DJJPSI(real[int] &X){
+		FeSpacetime psiaux =psi;
+		acenso(psiaux,gradpsi,X[0])
+		Solprimal(v,psiaux);		
+		Soldual(yya,yobj);
+		FillspaceElement(zdual,zza);
+		FeSpacetime gradpsiaux;
+		gradientePSI(gradpsiaux,psiaux,zdual);
+		real[int] valor(1);
+		valor[0] = -int2d(ThSpacetime)(gradpsiaux*gradpsi);
+		return valor;
+		}	
+		
+   func real[int] CV(real[int] &X){
+   if(gvnorm > 1.0)	   
+   X[0] = X[0]/gvnorm;
+   return X; //warning: no return of local array variable
+   }
+   
+   func real[int] CPSI(real[int] &X){
+   if(gpsinorm > 1.0)	   	   
+   X[0] = X[0]/gpsinorm;
+   return X; //warning: no return of local array variable
+   }
+   
+    cout << "Obteniendo el paso optimo  de v" << endl;
+    NLCG(DJJV, pasov, precon=CV , nbiter=10, eps=-optitol);
+    cout << "Obteniendo el paso optimo  de psi" << endl;
+    NLCG(DJJPSI, pasopsi, precon=CPSI , nbiter=10, eps=-optitol);
+
+
+   descenso(v,gradv,pasov[0]);
+   acenso(psi,gradpsi,pasopsi[0])
+		
+
+
+	cout << " paso para psi " << pasopsi[0] << endl;
+	cout << " paso para v " << pasov[0] << endl;
+	if( (optimalidad < optitol )  ){
+		salir =1;
+		}
+	} 
+ }
+//////////////FIN del algorithmo////////////////
+
+//(v,psi) corresponden al punto silla
+
+//resolviendo el estado primal con el punto silla
+// donde v y psi son soluciones del punto silla
+Solprimal(v,psi);
+////////////////////
+
+//Hace una interpolacion de u(v,psi) en la malla de espacio tiempo
+FillspaceElement(ysol,yya)	
+cout << endl << endl;
+
+///////////////////////////Guardando todo///////////////////////
+
+
+//guardando los parametros en un txt
+string identifier = "mu_" + mu +"_l_" + l +  "_gamma_" + gamma;
+string dirsave = "savefile/Control_robust_GD_nonlinar/" + identifier;
+exec("mkdir " + "savefile/Control_robust_GD_nonlinar/");
+exec("mkdir " + dirsave);
+
+{
+ofstream Saveparam(dirsave + "/parametros.txt"); 
+Saveparam << "mu " << mu << endl;
+Saveparam << "l " << l << endl;
+Saveparam << "gamma " << gamma << endl;
+Saveparam << "dt " << dt << endl;
+Saveparam << "Tfinal " << Tfinal << endl;
+Saveparam << "iterationnum " << iterationnum << endl;
+Saveparam << "optimalidad " << optimalidad << endl;
+}
+
+
+//guardando los estados
+exec("mkdir " + dirsave + "/Estados");
+
+
+//Guardando el error del control
+{
+string filename1 = "/T_error"  + ".txt";
+ofstream file(dirsave + filename1);
+for (int i=0;i<maxiteration;i++) {
+	FeOmega yobjslice = yobj(x,0.0); 
+    file <<(i+1)*dt <<" " << int1d(Th,2)((yya[i]-yobjslice)^2.0) << endl; 
+}		
+}
+
+{
+string name = dirsave + "/Estados/" + "ysol_matlab.txt" ;  
+ofstream savedataa(name);
+for(int i=0 ; i < ThSpacetime.nv; i++ )
+savedataa.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< ysol[][i] << endl;;
+}
+
+{
+string name = dirsave + "/Estados/" + "ysol_freefem.txt" ;  
+ofstream savedataa(name);
+savedataa << ysol[];
+}
+
+
+
+//guardando la pertubacion
+exec("mkdir " + dirsave + "/pertubacion");
+{
+	string name = dirsave + "/pertubacion/" + "psi_sol.txt";  
+	ofstream file(name);
+	file << psi[];
+}
+{
+	string name = dirsave + "/pertubacion/" + "psi_sol_matlab.txt";  
+	ofstream file(name);
+	for(int i=0 ; i < ThSpacetime.nv; i++ )
+	file.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< psi[][i] << endl;;
+
+}
+
+
+//guardando el control
+exec("mkdir " + dirsave + "/control");
+
+{
+	string name = dirsave + "/control/" + "v_sol.txt";  
+	ofstream file(name);
+	file << v[];
+}
+
+//control en todo el espacio
+FeSpacetime vfullspace = v*chi(ThSpacetimeControl); 
+
+{
+	string name = dirsave + "/control/" + "vfull_sol_matlab.txt";  
+	ofstream file(name);
+	for(int i=0 ; i < ThSpacetime.nv; i++ )
+	file.showbase << ThSpacetime(i).x << " " << ThSpacetime(i).y <<" "<< vfullspace[][i] << endl;;
+
+}
+
+
+{
+	int nplot = floor((1.0/meshheight)*(LmaxControl-LminControl));
+	mesh Thplotcontrol = square(nplot, maxiteration-1, [LminControl+(LmaxControl-LminControl)*x, dt + Tfinal*y]);
+	fespace FeOmegaControlplot(Thplotcontrol,P1);
+	FeOmegaControlplot  vsave=v;
+	string name = dirsave + "/control/" + "v_sol_matlab.txt";  
+	ofstream file(name);
+	for(int i=0 ; i < Thplotcontrol.nv; i++ )
+	file.showbase << Thplotcontrol(i).x << " " << Thplotcontrol(i).y <<" "<< vsave[][i] << endl;;
+}
+//Guardando loss datos para  despues
+savemesh(Th,dirsave + "/FeOmega.msh"); // freefem
+savemesh(ThControl,dirsave + "/FeOmegaControl.msh"); // freefem
+savemesh(ThSpacetime,dirsave + "/ThSpacetime.msh"); // freefem
+savemesh(ThSpacetimeControl,dirsave + "/ThSpacetimeControl.msh"); // freefem
+
+

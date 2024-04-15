@@ -1,0 +1,160 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+/*codigo para resolver el problema de control robusto mediante gradiente utilizado el tiempo
+ * 
+ * */
+verbosity= 0; //para minizar el texto de la pantalla
+include "ks_robust/macros.edp" 
+include "ks_robust/getARGV.idp"
+include "ks_robust/Condiciones_Robust.edp"
+
+/*
+include "macros.edp" 
+include "getARGV.idp"
+include "Condiciones_Robust.edp"
+*/
+
+
+/////////////////////PARAMETROS DE LA MALLA////////////////////////////////////
+int n1 = getARGV("-meshN",50); //calidad de la malla del dominio sin los hoyos
+real Lmin = getARGV("-Lmin",-30.0);
+real Lmax = getARGV("-Lmax",30.0);
+real LminControlF =  getARGV("-LminControlF",-10.0);  //lower bound of control region
+real LmaxControlF =  getARGV("-LmaxControlF",0.0);    //uppper bound of control region
+real LminControlLider =  getARGV("-LminControlLider",-1.0);    //uppper bound of control region
+real LmaxControlLider =  getARGV("-LmaxControlLider",8.0);    //uppper bound of control region
+real meshheight = (Lmax-Lmin)/n1;
+real theta = 1./4.;
+
+////////////////////PARAMETROS PARA EL CONTROL//////////////////////////
+real l = getARGV("-l",100.0);
+real gamma =getARGV("-gamma",1000.0);
+real mu =getARGV("-mu",200.0);
+real beta1 =getARGV("-beta1",0.0);
+real beta2 =  getARGV("-beta2",0.0);    //uppper bound of control region
+func psicontrolini =0.0;
+func vcontrolini =0.0;
+///////////////////////////////////////////////
+
+//////////////////////////PARAMETROS de la ecuacion//////////////////
+real Tfinal = getARGV("-Tfinal",1.0); // tiempo final
+real dt= getARGV("-dt",1./10.); // paso del tiempo para el euler hacia adelante
+real alpha=1./dt; // variable auxilar para el inverso del paso del tiempo
+int  maxiteration = Tfinal*alpha; // numero de iteraciones totales
+/////////////////////////////////////////////////////////////////////
+
+//////Parametros de termino/////////
+real optitol = getARGV("-optitol",10.0^(-6.0)); // tolerancoa del criterio de convergencia
+//////////////////////////////////////////
+
+
+///////////////////////////////////////////////
+string identifier = "mu_" + mu 
+				+   "_l_" + l 
+				+   "_gamma_" + gamma 
+				+   "_beta1_" + beta1 
+				+   "_beta2_" + beta2; 
+				
+string dirsave =  "ks_robust/savefile/Control_robust_GD_nonlinar/" + identifier;
+exec("mkdir " +  "ks_robust/savefile/Control_robust_GD_nonlinar/");
+exec("mkdir " + dirsave);
+///////////////////////////////////////////////////////////////
+
+
+
+//Definiendo las mallas y los espacio de elementos
+mesh ThSpacetime = square(n1, maxiteration-1, [Lmin+(Lmax-Lmin)*x, dt + Tfinal*y]);
+mesh Th = square(n1, 1, [Lmin+(Lmax-Lmin)*x, meshheight*y]);
+
+
+//definiendo las mallas
+real FollowerRegionLabel = 10;
+real LiderRegionLabel = 11;
+real IntersecRegionLabel = 12;
+real InterA=0,InterB=0;
+
+
+// ------aL---aF----bF----bL---
+if( (LminControlLider <= LminControlF ) && (LmaxControlF <= LmaxControlLider )){
+InterA = LminControlF;
+InterB = LmaxControlF;
+}
+
+// ------aL---aF----bL----bF---
+if( (LminControlLider <= LminControlF ) && (LmaxControlLider <= LmaxControlF )){
+InterA = LminControlF;
+InterB = LmaxControlLider;
+}
+
+// ------aF---aL----bF----bL---
+if( (LminControlF <= LminControlLider ) && (LmaxControlF <= LmaxControlLider )){
+InterA = LminControlLider;
+InterB = LmaxControlF;
+}
+
+// ------aF---aL----bL----bF----
+if( (LminControlF <= LminControlLider ) && (LmaxControlLider <= LmaxControlF )){
+InterA = LminControlLider;
+InterB = LmaxControlLider;
+}
+
+
+//cambiandoo los labels para el lider
+func  FuncLiderLabel = ( (LminControlLider  <=x) && (x <= LmaxControlLider) ) ? LiderRegionLabel : region;
+Th = change(Th,fregion=FuncLiderLabel);
+ThSpacetime = change(ThSpacetime,fregion=FuncLiderLabel);
+mesh ThControlL  = trunc(Th,region==LiderRegionLabel);
+mesh ThSpacetimeControlL  = trunc(ThSpacetime,region==LiderRegionLabel);
+
+//cambiando los labels para el follower
+func  FuncFollowerLabel = ( (LminControlF  <=x) && (x <= LmaxControlF) ) ? FollowerRegionLabel : region; 
+Th = change(Th,fregion=FuncFollowerLabel);
+ThSpacetime = change(ThSpacetime,fregion=FuncFollowerLabel);
+mesh ThControlF  = trunc(Th,region==FollowerRegionLabel);
+mesh ThSpacetimeControlF  = trunc(ThSpacetime,region==FollowerRegionLabel);
+
+//cambiando los labels para manejar la intersection
+func  FuncIntersecLabel = ( (InterA  <x) && (x < InterB) ) ? IntersecRegionLabel : region; 
+Th = change(Th,fregion=FuncIntersecLabel);
+ThSpacetime = change(ThSpacetime,fregion=FuncIntersecLabel);
+
+
+
+
+//elementos del subdominio
+fespace FeOmega(Th,P1,periodic=[[1,x],[3,x]]); //Espacio de elementos para ks
+fespace FeSpacetime(ThSpacetime,P1); //Espacio de elementos de ks
+
+fespace FeOmegaControlF(ThControlF,P1); //Espacio de elementos para ks control
+fespace FeSpacetimeControlF(ThSpacetimeControlF,P1); //Espacio de elementos de ks control en el tiempo
+
+fespace FeOmegaControlL(ThControlL,P1); //Espacio de elementos para ks control
+fespace FeSpacetimeControlL(ThSpacetimeControlL,P1); //Espacio de elementos de ks control en el tiempo
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+FeOmega[int]  cerroa(maxiteration); //objetivo cerro
+copyFe(cerroa,0.0); // defineidno el elemento cero
+
+/*
+real testval = int2d(ThControlF,10,12)(1.0);
+cout << InterA << " "<<InterB << endl;
+
+plot(ThSpacetime,wait=1);
+*/

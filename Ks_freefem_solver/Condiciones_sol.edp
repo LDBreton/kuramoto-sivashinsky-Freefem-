@@ -1,0 +1,4 @@
+func yini = 0.0*x + sin((x*pi)/30)^2;
+func yinixx = 0.0*x +(pi^2*cos((x*pi)/15))/450;
+func ksol= 0.0*x +sin((x*pi)/30)^2*(y + 1);
+func ksource= 0.0*x +sin((x*pi)/30)^2 + (pi^2*cos((x*pi)/30)^2*(y + 1))/450 - (pi^4*cos((x*pi)/30)^2*(y + 1))/101250 - (pi^2*sin((x*pi)/30)^2*(y + 1))/450 + (pi^4*sin((x*pi)/30)^2*(y + 1))/101250 + (pi*cos((x*pi)/30)*sin((x*pi)/30)^3*(y + 1)^2)/15;

@@ -1,0 +1,64 @@
+/* Authors: Louis Breton <louis.breton@ciencias.unam.mx>,
+ * Authors: Cristhian Montoya <cdmontoy@mat.uc.cl>,
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hopeC that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ */
+
+
+///////////////////Para plotear la solution en el tiempo/////////////////////////////////
+macro FillspaceElement(SpacetimeElement,elementarra)
+{
+for(int j=0 ; j < maxiteration ; j++ )
+	for (int i=j*(n1+1),k=0;i<(j+1)*(n1+1);i++){
+		real xvaraux = ThSpacetime(i).x;
+		SpacetimeElement[][i]  = elementarra[j][][k];
+		k++;
+	}
+}
+
+
+//macro para calcular el gradiente
+macro gradientes(gradvs,gradpsis,vs,psis,phi1sols)
+gradpsis = -gamma*gamma*psis-phi1sols;
+gradvs = l*l*vs-phi1sols;
+; //EOM
+macro gradienteV(gradvs,vs,phi1sols)
+gradvs = l*l*vs-phi1sols;
+; //EOM
+
+macro gradientePSI(gradpsis,psis,phi1sols)
+gradpsis = -gamma*gamma*psis-phi1sols;
+; //EOM
+
+//macro para ver la norm de la condicion de optimalidad
+macro caloptimalidad(gradvk,gradpsik,optimalidad)
+optimalidad = 0.;
+optimalidad = optimalidad + int2d(ThSpacetime,10)(gradvk^2);
+optimalidad = optimalidad + int2d(ThSpacetime)(gradpsik^2);
+; //EOM
+
+
+//macro para el paso de descenso
+macro descenso(vk,gradvk,pasovk)
+vk = vk - pasovk*gradvk;
+//EOM
+
+//macro para el paso de acenso
+macro acenso(psik,gradpsik,pasopsik)
+psik = psik + pasopsik*gradpsik;
+ //EOM
+
+

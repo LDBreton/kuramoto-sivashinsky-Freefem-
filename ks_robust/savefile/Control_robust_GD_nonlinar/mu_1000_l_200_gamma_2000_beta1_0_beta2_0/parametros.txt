@@ -1,0 +1,7 @@
+mu 1000
+l 200
+gamma 2000
+dt 0.05
+Tfinal 8
+beta1 0
+beta2 0
