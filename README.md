@@ -42,5 +42,11 @@ Ks_robust
 
 ## Citation
 
+If you use this software in your research, please cite the following work:
+
+Breton, L., & Montoya, C. (2022). Robust Stackelberg controllability for the Kuramoto--Sivashinsky equation. *Mathematics of Control, Signals, and Systems*, 34(3), 515-558. Springer. [https://doi.org/10.1007/s00498-022-00314-5](https://doi.org/10.1007/s00498-022-00314-5)
+
+
+
 
 
